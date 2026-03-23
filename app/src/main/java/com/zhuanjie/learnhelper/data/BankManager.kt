@@ -17,11 +17,22 @@ data class QuestionBank(
     val isBuiltin: Boolean = false
 )
 
+data class RelatedDataCount(
+    val chatCount: Int,
+    val wrongCount: Int,
+    val explanationCount: Int
+) {
+    val hasAny: Boolean get() = chatCount > 0 || wrongCount > 0 || explanationCount > 0
+}
+
 class BankManager(private val context: Context) {
     private val gson = Gson()
     private val db = AppDatabase.getInstance(context)
     private val questionDao = db.questionDao()
     private val bankDao = db.bankDao()
+    private val chatMessageDao = db.chatMessageDao()
+    private val wrongAnswerDao = db.wrongAnswerDao()
+    private val customExplanationDao = db.customExplanationDao()
     private val prefs = context.getSharedPreferences("bank_manager", Context.MODE_PRIVATE)
 
     companion object {
@@ -78,21 +89,30 @@ class BankManager(private val context: Context) {
         questionDao.insert(question.toEntity(bankId))
     }
 
-    fun updateQuestion(bankId: String, oldQuestionId: String, updated: Question) {
-        val realBankId = if (bankId == MIXED_ID) questionDao.findBankByStringId(oldQuestionId) ?: return else bankId
-        val entity = questionDao.findByStringId(realBankId, oldQuestionId)
-        if (entity != null) {
-            questionDao.update(updated.toEntity(realBankId, entity.id))
-        }
+    fun updateQuestion(bankId: String, question: Question) {
+        val realBankId = if (bankId == MIXED_ID) questionDao.findBankById(question.dbId) ?: return else bankId
+        val entity = questionDao.findById(question.dbId) ?: return
+        questionDao.update(question.toEntity(realBankId, entity.id))
     }
 
-    fun deleteQuestion(bankId: String, questionId: String) {
-        val realBankId = if (bankId == MIXED_ID) questionDao.findBankByStringId(questionId) ?: return else bankId
-        questionDao.deleteByStringId(realBankId, questionId)
+    fun deleteQuestion(questionDbId: Long) {
+        // Cascade delete related data
+        chatMessageDao.deleteByQuestion(questionDbId)
+        wrongAnswerDao.deleteByQuestionId(questionDbId)
+        customExplanationDao.deleteByQuestionId(questionDbId)
+        questionDao.deleteById(questionDbId)
     }
 
-    fun findBankIdForQuestion(questionId: String): String? {
-        return questionDao.findBankByStringId(questionId)
+    fun getRelatedDataCount(questionDbId: Long): RelatedDataCount {
+        return RelatedDataCount(
+            chatCount = chatMessageDao.countByQuestion(questionDbId),
+            wrongCount = wrongAnswerDao.countByQuestionId(questionDbId),
+            explanationCount = customExplanationDao.countByQuestionId(questionDbId)
+        )
+    }
+
+    fun findBankIdForQuestion(questionDbId: Long): String? {
+        return questionDao.findBankById(questionDbId)
     }
 
     // --- Import / Export ---
@@ -126,6 +146,13 @@ class BankManager(private val context: Context) {
 
     fun deleteBank(bankId: String) {
         if (bankId == BUILTIN_ID) return
+        // Cascade delete all related data for all questions in this bank
+        val questions = questionDao.getByBank(bankId)
+        questions.forEach { q ->
+            chatMessageDao.deleteByQuestion(q.id)
+            wrongAnswerDao.deleteByQuestionId(q.id)
+            customExplanationDao.deleteByQuestionId(q.id)
+        }
         questionDao.deleteAllByBank(bankId)
         bankDao.deleteById(bankId)
         if (activeBankId == bankId) {
@@ -134,9 +161,16 @@ class BankManager(private val context: Context) {
     }
 
     fun resetBuiltin() {
+        // Cascade delete related data for builtin questions
+        val questions = questionDao.getByBank(BUILTIN_ID)
+        questions.forEach { q ->
+            chatMessageDao.deleteByQuestion(q.id)
+            wrongAnswerDao.deleteByQuestionId(q.id)
+            customExplanationDao.deleteByQuestionId(q.id)
+        }
         questionDao.deleteAllByBank(BUILTIN_ID)
-        val questions = QuestionLoader.loadFromAssets(context)
-        questionDao.insertAll(questions.map { it.toEntity(BUILTIN_ID) })
+        val newQuestions = QuestionLoader.loadFromAssets(context)
+        questionDao.insertAll(newQuestions.map { it.toEntity(BUILTIN_ID) })
     }
 
     fun exportBankJson(bankId: String): String {
@@ -172,9 +206,9 @@ class BankManager(private val context: Context) {
 
     // --- Conversion helpers ---
 
-    private fun Question.toEntity(bankId: String, dbId: Long = 0): QuestionEntity {
+    private fun Question.toEntity(bankId: String, existingId: Long = 0): QuestionEntity {
         return QuestionEntity(
-            id = dbId,
+            id = if (existingId != 0L) existingId else SnowflakeId.next(),
             bankId = bankId,
             stringId = this.id,
             tag = tag,

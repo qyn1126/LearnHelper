@@ -61,6 +61,7 @@ import com.zhuanjie.learnhelper.data.Question
 import com.zhuanjie.learnhelper.data.QuizSummaryItem
 import com.zhuanjie.learnhelper.data.SummaryManager
 import com.zhuanjie.learnhelper.data.WrongDetail
+import com.zhuanjie.learnhelper.data.db.AppDatabase
 import com.zhuanjie.learnhelper.network.QwenApi
 import com.zhuanjie.learnhelper.ui.theme.LearnHelperTheme
 import kotlinx.coroutines.launch
@@ -82,6 +83,11 @@ fun SummaryScreen(
     onEditQuestion: ((Question) -> Unit)? = null,
     onDeleteQuestion: ((Question) -> Unit)? = null
 ) {
+    val context = LocalContext.current
+    val db = remember { AppDatabase.getInstance(context) }
+    val wrongAnswerDao = remember { db.wrongAnswerDao() }
+    val customExplanationDao = remember { db.customExplanationDao() }
+
     var selectedTab by rememberSaveable { mutableIntStateOf(0) }
     var refreshTrigger by remember { mutableIntStateOf(0) }
 
@@ -90,13 +96,13 @@ fun SummaryScreen(
         if (isActive) refreshTrigger++
     }
 
-    val wrongIds = remember(refreshTrigger) { prefManager.getWrongAnswerIds() }
+    val wrongQuestionIds = remember(refreshTrigger) { wrongAnswerDao.getAllQuestionIds().toSet() }
     val wrongQuestions = remember(refreshTrigger, allQuestions) {
-        allQuestions.filter { it.id in wrongIds }
+        allQuestions.filter { it.dbId in wrongQuestionIds }
     }
-    val chatQuestionIds = remember(refreshTrigger) { chatStorage.getAllChatQuestionIds() }
+    val chatQuestionIds = remember(refreshTrigger) { chatStorage.getAllChatQuestionIds().toSet() }
     val chatQuestions = remember(chatQuestionIds, allQuestions) {
-        chatQuestionIds.mapNotNull { qId -> allQuestions.find { it.id == qId } }
+        allQuestions.filter { it.dbId in chatQuestionIds }
     }
     val summaries = remember(refreshTrigger) { summaryManager.getAllSummaries() }
 
@@ -125,8 +131,8 @@ fun SummaryScreen(
         }
     ) { padding ->
         when (selectedTab) {
-            0 -> WrongQuestionsTab(wrongQuestions, prefManager, onOpenAiChat, onEditQuestion, onDeleteQuestion,
-                onRemoveWrong = { prefManager.removeWrongAnswer(it); refreshTrigger++ },
+            0 -> WrongQuestionsTab(wrongQuestions, customExplanationDao, onOpenAiChat, onEditQuestion, onDeleteQuestion,
+                onRemoveWrong = { wrongAnswerDao.deleteByQuestionId(it); refreshTrigger++ },
                 modifier = Modifier.padding(padding))
             1 -> AiChatHistoryTab(chatQuestions, chatStorage, onOpenAiChat,
                 onDeleteChat = { chatStorage.deleteMessages(it); refreshTrigger++ },
@@ -144,11 +150,11 @@ fun SummaryScreen(
 @Composable
 private fun WrongQuestionsTab(
     wrongQuestions: List<Question>,
-    prefManager: PreferenceManager,
+    customExplanationDao: com.zhuanjie.learnhelper.data.db.CustomExplanationDao,
     onOpenAiChat: (Question) -> Unit,
     onEditQuestion: ((Question) -> Unit)?,
     onDeleteQuestion: ((Question) -> Unit)?,
-    onRemoveWrong: (String) -> Unit,
+    onRemoveWrong: (Long) -> Unit,
     modifier: Modifier
 ) {
     if (wrongQuestions.isEmpty()) {
@@ -177,7 +183,7 @@ private fun WrongQuestionsTab(
                                 Spacer(Modifier.height(8.dp))
                                 Text("解析: ${question.explanationText}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
-                            val custom = prefManager.getCustomExplanation(question.id)
+                            val custom = remember(question.dbId) { customExplanationDao.findByQuestionId(question.dbId)?.content }
                             if (custom != null) {
                                 Spacer(Modifier.height(8.dp))
                                 Text("AI 解析:", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
@@ -188,7 +194,7 @@ private fun WrongQuestionsTab(
                                 if (onEditQuestion != null) TextButton(onClick = { onEditQuestion(question) }) { Text("编辑") }
                                 if (onDeleteQuestion != null) TextButton(onClick = { onDeleteQuestion(question) }) { Text("删除") }
                                 TextButton(onClick = { onOpenAiChat(question) }) { Text("问 AI") }
-                                TextButton(onClick = { onRemoveWrong(question.id) }) { Text("移除", color = MaterialTheme.colorScheme.error) }
+                                TextButton(onClick = { onRemoveWrong(question.dbId) }) { Text("移除", color = MaterialTheme.colorScheme.error) }
                             }
                         }
                     }
@@ -205,7 +211,7 @@ private fun AiChatHistoryTab(
     chatQuestions: List<Question>,
     chatStorage: ChatStorage,
     onOpenAiChat: (Question) -> Unit,
-    onDeleteChat: (String) -> Unit,
+    onDeleteChat: (Long) -> Unit,
     modifier: Modifier
 ) {
     if (chatQuestions.isEmpty()) {
@@ -214,8 +220,8 @@ private fun AiChatHistoryTab(
         LazyColumn(modifier = modifier.fillMaxSize(),
             contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(chatQuestions, key = { "chat_${it.dbId}" }) { question ->
-                val lastMsg = remember(question.id) { chatStorage.getLastMessage(question.id) }
-                val msgCount = remember(question.id) { chatStorage.getMessageCount(question.id) }
+                val lastMsg = remember(question.dbId) { chatStorage.getLastMessage(question.dbId) }
+                val msgCount = remember(question.dbId) { chatStorage.getMessageCount(question.dbId) }
                 Card(onClick = { onOpenAiChat(question) }, modifier = Modifier.fillMaxWidth()) {
                     Row(modifier = Modifier.padding(start = 16.dp, top = 12.dp, bottom = 12.dp, end = 4.dp),
                         verticalAlignment = Alignment.CenterVertically) {
@@ -228,7 +234,7 @@ private fun AiChatHistoryTab(
                             }
                             Text("$msgCount 条对话", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
-                        IconButton(onClick = { onDeleteChat(question.id) }) {
+                        IconButton(onClick = { onDeleteChat(question.dbId) }) {
                             Icon(Icons.Default.Delete, "删除记录", tint = MaterialTheme.colorScheme.error)
                         }
                     }

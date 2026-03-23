@@ -19,6 +19,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -56,6 +57,9 @@ import com.zhuanjie.learnhelper.data.PreferenceManager
 import com.zhuanjie.learnhelper.data.Question
 import com.zhuanjie.learnhelper.data.QuestionBank
 import com.zhuanjie.learnhelper.data.QuizResult
+import com.zhuanjie.learnhelper.data.db.AppDatabase
+import com.zhuanjie.learnhelper.data.SnowflakeId
+import com.zhuanjie.learnhelper.data.db.WrongAnswerEntity
 import com.zhuanjie.learnhelper.ui.theme.LearnHelperTheme
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -102,6 +106,11 @@ fun QuizScreen(
         return
     }
 
+    val context = LocalContext.current
+    val db = remember { AppDatabase.getInstance(context) }
+    val wrongAnswerDao = remember { db.wrongAnswerDao() }
+    val customExplanationDao = remember { db.customExplanationDao() }
+
     var isRandomMode by rememberSaveable { mutableStateOf(if (isReviewMode) false else prefManager.quizIsRandomMode) }
     var isReciteMode by rememberSaveable { mutableStateOf(if (isReviewMode) false else prefManager.quizIsReciteMode) }
     var randomSeed by rememberSaveable { mutableStateOf(prefManager.quizRandomSeed) }
@@ -118,24 +127,32 @@ fun QuizScreen(
         )
     }
     var showFinishDialog by remember { mutableStateOf(false) }
+    // Pending mode switch: "random" or "sequential", confirmed after dialog
+    var pendingSwitch by remember { mutableStateOf<String?>(null) }
 
     // Unified answer state: supports both single and multi choice
     var selectedOptions by remember { mutableStateOf<Set<String>>(emptySet()) }
     var hasSubmitted by remember { mutableStateOf(false) }
 
-    // Session answer tracking: questionId -> userAnswer string
-    var sessionAnswers by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+    // Session answer tracking: questionDbId -> userAnswer string
+    var sessionAnswers by remember { mutableStateOf<Map<Long, String>>(emptyMap()) }
 
     val safeIndex = currentIndex.coerceIn(0, questions.size - 1)
     val actualIndex = questionOrder.getOrElse(safeIndex) { 0 }.coerceIn(0, questions.size - 1)
     val question = questions[actualIndex]
-    val customExplanation = prefManager.getCustomExplanation(question.id)
-    val wrongIds = prefManager.getWrongAnswerIds()
-    val isInWrongBook = question.id in wrongIds
+
+    // Read from Room DB instead of SharedPreferences
+    var customExplanation by remember { mutableStateOf<String?>(null) }
+    var isInWrongBook by remember { mutableStateOf(false) }
+
+    LaunchedEffect(question.dbId) {
+        customExplanation = customExplanationDao.findByQuestionId(question.dbId)?.content
+        isInWrongBook = wrongAnswerDao.exists(question.dbId)
+    }
 
     // Restore state when navigating to a previously answered question
-    LaunchedEffect(question.id) {
-        val prev = sessionAnswers[question.id]
+    LaunchedEffect(question.dbId) {
+        val prev = sessionAnswers[question.dbId]
         if (prev != null) {
             selectedOptions = prev.map { it.toString() }.toSet()
             hasSubmitted = true
@@ -159,11 +176,15 @@ fun QuizScreen(
         if (hasSubmitted || selectedOptions.isEmpty()) return
         hasSubmitted = true
         val ansStr = userAnswerStr()
-        sessionAnswers = sessionAnswers + (question.id to ansStr)
+        sessionAnswers = sessionAnswers + (question.dbId to ansStr)
         if (!isCorrectAnswer()) {
-            prefManager.addWrongAnswer(question.id)
+            if (!wrongAnswerDao.exists(question.dbId)) {
+                wrongAnswerDao.insert(WrongAnswerEntity(id = SnowflakeId.next(), questionId = question.dbId))
+            }
+            isInWrongBook = true
         } else if (isReviewMode) {
-            prefManager.removeWrongAnswer(question.id)
+            wrongAnswerDao.deleteByQuestionId(question.dbId)
+            isInWrongBook = false
         }
     }
 
@@ -173,11 +194,38 @@ fun QuizScreen(
     }
 
     fun buildResult(): QuizResult {
-        val records = sessionAnswers.mapNotNull { (qId, userAnswer) ->
-            val q = questions.find { it.id == qId } ?: return@mapNotNull null
+        val records = sessionAnswers.mapNotNull { (qDbId, userAnswer) ->
+            val q = questions.find { it.dbId == qDbId } ?: return@mapNotNull null
             AnswerRecord(q, userAnswer, userAnswer == q.correctAnswerSet.joinToString(""))
         }
         return QuizResult(records)
+    }
+
+    fun doSwitchToRandom() {
+        isRandomMode = true
+        prefManager.quizIsRandomMode = true
+        val newSeed = System.nanoTime()
+        randomSeed = newSeed
+        prefManager.quizRandomSeed = newSeed
+        currentIndex = 0
+        prefManager.quizProgress = 0
+        sessionAnswers = emptyMap()
+    }
+
+    fun doSwitchToSequential() {
+        isRandomMode = false
+        prefManager.quizIsRandomMode = false
+        currentIndex = 0
+        prefManager.quizProgress = 0
+        sessionAnswers = emptyMap()
+    }
+
+    fun trySwitch(target: String) {
+        if (sessionAnswers.isNotEmpty()) {
+            pendingSwitch = target
+        } else {
+            if (target == "random") doSwitchToRandom() else doSwitchToSequential()
+        }
     }
 
     var showBankDropdown by remember { mutableStateOf(false) }
@@ -252,15 +300,7 @@ fun QuizScreen(
                                     text = { Text("随机") },
                                     onClick = {
                                         showOrderMenu = false
-                                        if (!isRandomMode) {
-                                            isRandomMode = true
-                                            prefManager.quizIsRandomMode = true
-                                            val newSeed = System.nanoTime()
-                                            randomSeed = newSeed
-                                            prefManager.quizRandomSeed = newSeed
-                                            currentIndex = 0
-                                            prefManager.quizProgress = 0
-                                        }
+                                        if (!isRandomMode) trySwitch("random")
                                     },
                                     trailingIcon = { if (isRandomMode) Text("*", fontWeight = FontWeight.Bold) }
                                 )
@@ -268,11 +308,7 @@ fun QuizScreen(
                                     text = { Text("顺序") },
                                     onClick = {
                                         showOrderMenu = false
-                                        if (isRandomMode) {
-                                            isRandomMode = false
-                                            prefManager.quizIsRandomMode = false
-                                            currentIndex = prefManager.quizProgress.coerceIn(0, questions.size - 1)
-                                        }
+                                        if (isRandomMode) trySwitch("sequential")
                                     },
                                     trailingIcon = { if (!isRandomMode) Text("*", fontWeight = FontWeight.Bold) }
                                 )
@@ -320,8 +356,8 @@ fun QuizScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 if (sessionAnswers.isNotEmpty()) {
-                    val correct = sessionAnswers.count { (qId, ans) ->
-                        questions.find { it.id == qId }?.correctAnswerSet?.joinToString("") == ans
+                    val correct = sessionAnswers.count { (qDbId, ans) ->
+                        questions.find { it.dbId == qDbId }?.correctAnswerSet?.joinToString("") == ans
                     }
                     Text(
                         "已答 ${sessionAnswers.size} 对 $correct 错 ${sessionAnswers.size - correct}",
@@ -476,7 +512,7 @@ fun QuizScreen(
                 if (customExplanation != null) {
                     Text("AI 解析", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(4.dp))
-                    MarkdownText(text = customExplanation, style = MaterialTheme.typography.bodyMedium)
+                    MarkdownText(text = customExplanation!!, style = MaterialTheme.typography.bodyMedium)
                     Spacer(Modifier.height(12.dp))
                 }
 
@@ -543,8 +579,8 @@ fun QuizScreen(
 
     if (showFinishDialog) {
         val count = sessionAnswers.size
-        val correct = sessionAnswers.count { (qId, ans) ->
-            questions.find { it.id == qId }?.correctAnswerSet?.joinToString("") == ans
+        val correct = sessionAnswers.count { (qDbId, ans) ->
+            questions.find { it.dbId == qDbId }?.correctAnswerSet?.joinToString("") == ans
         }
         AlertDialog(
             onDismissRequest = { showFinishDialog = false },
@@ -556,6 +592,73 @@ fun QuizScreen(
             dismissButton = {
                 TextButton(onClick = { showFinishDialog = false }) { Text("继续刷题") }
             }
+        )
+    }
+
+    // Switch mode confirmation when there's progress
+    if (pendingSwitch != null) {
+        val count = sessionAnswers.size
+        val correct = sessionAnswers.count { (qDbId, ans) ->
+            questions.find { it.dbId == qDbId }?.correctAnswerSet?.joinToString("") == ans
+        }
+        val wrong = count - correct
+        val targetName = if (pendingSwitch == "random") "随机" else "顺序"
+        val accuracy = if (count > 0) "%.0f".format(correct.toFloat() / count * 100) else "0"
+        AlertDialog(
+            onDismissRequest = { pendingSwitch = null },
+            title = { Text("切换为${targetName}模式") },
+            text = {
+                Column {
+                    Text("切换模式将重置进度，如何处理本次刷题?", style = MaterialTheme.typography.bodyMedium)
+                    Spacer(Modifier.height(12.dp))
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(12.dp),
+                            horizontalArrangement = Arrangement.SpaceEvenly
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text("$count", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                Text("已答", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text("$correct", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = Color(0xFF4CAF50))
+                                Text("正确", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text("$wrong", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = Color(0xFFF44336))
+                                Text("错误", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text("$accuracy%", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                                Text("正确率", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Column(modifier = Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End) {
+                    Button(onClick = {
+                        val result = buildResult()
+                        val switch = pendingSwitch
+                        pendingSwitch = null
+                        onFinish?.invoke(result)
+                        if (switch == "random") doSwitchToRandom() else doSwitchToSequential()
+                    }, modifier = Modifier.fillMaxWidth()) { Text("结束并生成总结") }
+                    Spacer(Modifier.height(4.dp))
+                    OutlinedButton(onClick = {
+                        val switch = pendingSwitch
+                        pendingSwitch = null
+                        if (switch == "random") doSwitchToRandom() else doSwitchToSequential()
+                    }, modifier = Modifier.fillMaxWidth()) { Text("放弃本次记录") }
+                    Spacer(Modifier.height(4.dp))
+                    TextButton(onClick = { pendingSwitch = null }, modifier = Modifier.fillMaxWidth()) { Text("取消") }
+                }
+            },
+            dismissButton = {}
         )
     }
 }

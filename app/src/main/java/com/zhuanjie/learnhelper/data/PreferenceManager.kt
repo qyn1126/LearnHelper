@@ -136,7 +136,7 @@ class PreferenceManager(context: Context) {
         prefs.edit().remove("token_usage").apply()
     }
 
-    // ==================== Quiz / Wrong answers ====================
+    // ==================== Quiz ====================
 
     var quizProgress: Int
         get() = prefs.getInt("quiz_progress", 0)
@@ -153,30 +153,4 @@ class PreferenceManager(context: Context) {
     var quizIsReciteMode: Boolean
         get() = prefs.getBoolean("quiz_is_recite", false)
         set(value) = prefs.edit().putBoolean("quiz_is_recite", value).apply()
-
-    fun getWrongAnswerIds(): Set<String> =
-        prefs.getStringSet("wrong_answers", emptySet()) ?: emptySet()
-
-    fun addWrongAnswer(id: String) {
-        val set = getWrongAnswerIds().toMutableSet()
-        set.add(id)
-        prefs.edit().putStringSet("wrong_answers", set).apply()
-    }
-
-    fun removeWrongAnswer(id: String) {
-        val set = getWrongAnswerIds().toMutableSet()
-        set.remove(id)
-        prefs.edit().putStringSet("wrong_answers", set).apply()
-    }
-
-    fun clearWrongAnswers() {
-        prefs.edit().remove("wrong_answers").apply()
-    }
-
-    fun getCustomExplanation(questionId: String): String? =
-        prefs.getString("explanation_$questionId", null)
-
-    fun setCustomExplanation(questionId: String, explanation: String) {
-        prefs.edit().putString("explanation_$questionId", explanation).apply()
-    }
 }

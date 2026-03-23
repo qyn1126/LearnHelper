@@ -15,8 +15,8 @@ android {
         applicationId = "com.zhuanjie.learnhelper"
         minSdk = 24
         targetSdk = 36
-        versionCode = 2
-        versionName = "1.01"
+        versionCode = 3
+        versionName = "1.02"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

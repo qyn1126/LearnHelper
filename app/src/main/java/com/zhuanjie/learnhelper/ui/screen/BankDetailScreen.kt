@@ -46,6 +46,7 @@ import androidx.compose.ui.unit.dp
 import com.zhuanjie.learnhelper.data.BankManager
 import com.zhuanjie.learnhelper.data.Question
 import com.zhuanjie.learnhelper.data.QuestionBank
+import com.zhuanjie.learnhelper.data.RelatedDataCount
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -59,6 +60,7 @@ fun BankDetailScreen(
     var refreshTrigger by remember { mutableIntStateOf(0) }
     var searchQuery by rememberSaveable { mutableStateOf("") }
     var showDeleteDialog by remember { mutableStateOf<Question?>(null) }
+    var deleteRelatedData by remember { mutableStateOf<RelatedDataCount?>(null) }
 
     val questions = remember(refreshTrigger) { bankManager.loadQuestions(bank.id) }
     val filtered = remember(refreshTrigger, searchQuery) {
@@ -129,7 +131,10 @@ fun BankDetailScreen(
                         QuestionListItem(
                             question = question,
                             onEdit = { onEditQuestion(question) },
-                            onDelete = { showDeleteDialog = question }
+                            onDelete = {
+                                deleteRelatedData = bankManager.getRelatedDataCount(question.dbId)
+                                showDeleteDialog = question
+                            }
                         )
                     }
                 }
@@ -137,25 +142,35 @@ fun BankDetailScreen(
         }
     }
 
-    // Delete confirmation
+    // Delete confirmation with related data info
     showDeleteDialog?.let { question ->
+        val related = deleteRelatedData
+        val relatedInfo = if (related != null && related.hasAny) {
+            val parts = mutableListOf<String>()
+            if (related.chatCount > 0) parts.add("${related.chatCount} 条对话记录")
+            if (related.wrongCount > 0) parts.add("错题标记")
+            if (related.explanationCount > 0) parts.add("AI 解析")
+            "\n\n该题目有 ${parts.joinToString("、")}，删除后将一并清除。"
+        } else ""
+
         AlertDialog(
-            onDismissRequest = { showDeleteDialog = null },
+            onDismissRequest = { showDeleteDialog = null; deleteRelatedData = null },
             title = { Text("删除题目") },
             text = {
-                Text("确定删除?\n\n${question.question.take(80)}${if (question.question.length > 80) "..." else ""}")
+                Text("确定删除?\n\n${question.question.take(80)}${if (question.question.length > 80) "..." else ""}$relatedInfo")
             },
             confirmButton = {
                 TextButton(onClick = {
-                    bankManager.deleteQuestion(bank.id, question.id)
+                    bankManager.deleteQuestion(question.dbId)
                     refreshTrigger++
                     showDeleteDialog = null
+                    deleteRelatedData = null
                 }) {
                     Text("删除", color = MaterialTheme.colorScheme.error)
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showDeleteDialog = null }) { Text("取消") }
+                TextButton(onClick = { showDeleteDialog = null; deleteRelatedData = null }) { Text("取消") }
             }
         )
     }

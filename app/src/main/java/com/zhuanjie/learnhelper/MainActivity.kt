@@ -33,6 +33,7 @@ import com.zhuanjie.learnhelper.data.PreferenceManager
 import com.zhuanjie.learnhelper.data.Question
 import com.zhuanjie.learnhelper.data.QuestionBank
 import com.zhuanjie.learnhelper.data.QuizResult
+import com.zhuanjie.learnhelper.data.RelatedDataCount
 import com.zhuanjie.learnhelper.network.QwenApi
 import com.zhuanjie.learnhelper.ui.screen.AiChatScreen
 import com.zhuanjie.learnhelper.ui.screen.BankDetailScreen
@@ -83,7 +84,7 @@ fun LearnHelperApp() {
 
     // Overlay screens
     var showAiChat by rememberSaveable { mutableStateOf(false) }
-    var aiChatQuestionId by rememberSaveable { mutableStateOf("") }
+    var aiChatQuestionDbId by rememberSaveable { mutableStateOf(0L) }
     var showWrongReview by rememberSaveable { mutableStateOf(false) }
     var wrongReviewQuestions by remember { mutableStateOf<List<Question>>(emptyList()) }
     var showQuizResult by rememberSaveable { mutableStateOf(false) }
@@ -93,8 +94,9 @@ fun LearnHelperApp() {
     // Edit / Delete state
     var showEditScreen by rememberSaveable { mutableStateOf(false) }
     var editingQuestion by remember { mutableStateOf<Question?>(null) }
-    var editingBankId by rememberSaveable { mutableStateOf("") } // which bank the edit belongs to
+    var editingBankId by rememberSaveable { mutableStateOf("") }
     var showDeleteDialog by remember { mutableStateOf<Question?>(null) }
+    var deleteRelatedData by remember { mutableStateOf<RelatedDataCount?>(null) }
 
     // Bank detail state
     var showBankDetail by rememberSaveable { mutableStateOf(false) }
@@ -106,7 +108,7 @@ fun LearnHelperApp() {
     }
 
     val openAiChat: (Question) -> Unit = { question ->
-        aiChatQuestionId = question.id
+        aiChatQuestionDbId = question.dbId
         showAiChat = true
     }
 
@@ -121,11 +123,12 @@ fun LearnHelperApp() {
 
     val onEditQuestion: (Question) -> Unit = { question ->
         editingQuestion = question
-        editingBankId = bankManager.findBankIdForQuestion(question.id) ?: activeBankId
+        editingBankId = bankManager.findBankIdForQuestion(question.dbId) ?: activeBankId
         showEditScreen = true
     }
 
     val onDeleteQuestion: (Question) -> Unit = { question ->
+        deleteRelatedData = bankManager.getRelatedDataCount(question.dbId)
         showDeleteDialog = question
     }
 
@@ -279,7 +282,7 @@ fun LearnHelperApp() {
                     onSave = { updated ->
                         val targetBankId = editingBankId.ifBlank { activeBankId }
                         if (editingQuestion != null) {
-                            bankManager.updateQuestion(targetBankId, editingQuestion!!.id, updated)
+                            bankManager.updateQuestion(targetBankId, updated)
                         } else {
                             bankManager.addQuestion(targetBankId, updated)
                         }
@@ -296,8 +299,8 @@ fun LearnHelperApp() {
         }
 
         // AI chat overlay (on top of everything)
-        if (showAiChat && aiChatQuestionId.isNotEmpty()) {
-            val question = questions.find { it.id == aiChatQuestionId }
+        if (showAiChat && aiChatQuestionDbId != 0L) {
+            val question = questions.find { it.dbId == aiChatQuestionDbId }
             if (question != null) {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     AiChatScreen(
@@ -312,23 +315,33 @@ fun LearnHelperApp() {
         }
     }
 
-    // Delete confirmation dialog
+    // Delete confirmation dialog with related data info
     showDeleteDialog?.let { question ->
+        val related = deleteRelatedData
+        val relatedInfo = if (related != null && related.hasAny) {
+            val parts = mutableListOf<String>()
+            if (related.chatCount > 0) parts.add("${related.chatCount} 条对话记录")
+            if (related.wrongCount > 0) parts.add("错题标记")
+            if (related.explanationCount > 0) parts.add("AI 解析")
+            "\n\n该题目有 ${parts.joinToString("、")}，删除后将一并清除。"
+        } else ""
+
         AlertDialog(
-            onDismissRequest = { showDeleteDialog = null },
+            onDismissRequest = { showDeleteDialog = null; deleteRelatedData = null },
             title = { Text("删除题目") },
-            text = { Text("确定删除\"${question.title}\"?\n\n${question.question.take(50)}...") },
+            text = { Text("确定删除\"${question.title}\"?\n\n${question.question.take(50)}...$relatedInfo") },
             confirmButton = {
                 TextButton(onClick = {
-                    bankManager.deleteQuestion(activeBankId, question.id)
+                    bankManager.deleteQuestion(question.dbId)
                     reloadQuestions()
                     showDeleteDialog = null
+                    deleteRelatedData = null
                 }) {
                     Text("删除", color = androidx.compose.material3.MaterialTheme.colorScheme.error)
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showDeleteDialog = null }) { Text("取消") }
+                TextButton(onClick = { showDeleteDialog = null; deleteRelatedData = null }) { Text("取消") }
             }
         )
     }

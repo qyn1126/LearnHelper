@@ -65,6 +65,7 @@ fun SettingsScreen(
     totalQuestions: Int,
     onOpenBankManager: () -> Unit = {}
 ) {
+    val context = LocalContext.current
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     var refreshTrigger by remember { mutableIntStateOf(0) }
@@ -315,7 +316,8 @@ fun SettingsScreen(
             SectionTitle("数据管理")
 
             Text("刷题进度: ${(prefManager.quizProgress + 1).coerceAtMost(totalQuestions)} / $totalQuestions", style = MaterialTheme.typography.bodyMedium)
-            Text("错题数量: ${prefManager.getWrongAnswerIds().size}", style = MaterialTheme.typography.bodyMedium)
+            val wrongCount = remember(refreshTrigger) { com.zhuanjie.learnhelper.data.db.AppDatabase.getInstance(context).wrongAnswerDao().getAll().size }
+            Text("错题数量: $wrongCount", style = MaterialTheme.typography.bodyMedium)
 
             Spacer(Modifier.height(12.dp))
             OutlinedButton(onClick = { showResetDialog = true }, modifier = Modifier.fillMaxWidth()) { Text("重置刷题进度") }
@@ -379,7 +381,7 @@ fun SettingsScreen(
             onDismissRequest = { showClearWrongDialog = false },
             title = { Text("确认清空") },
             text = { Text("确定要清空错题本吗?") },
-            confirmButton = { TextButton(onClick = { prefManager.clearWrongAnswers(); showClearWrongDialog = false }) { Text("确定", color = MaterialTheme.colorScheme.error) } },
+            confirmButton = { TextButton(onClick = { com.zhuanjie.learnhelper.data.db.AppDatabase.getInstance(context).wrongAnswerDao().deleteAll(); refreshTrigger++; showClearWrongDialog = false }) { Text("确定", color = MaterialTheme.colorScheme.error) } },
             dismissButton = { TextButton(onClick = { showClearWrongDialog = false }) { Text("取消") } }
         )
     }

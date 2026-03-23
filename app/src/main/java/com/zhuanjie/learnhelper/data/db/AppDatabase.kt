@@ -17,7 +17,7 @@ import androidx.room.Update
 
 @Entity(tableName = "questions", indices = [Index("bankId"), Index("bankId", "stringId")])
 data class QuestionEntity(
-    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    @PrimaryKey val id: Long, // snowflake ID, NOT autoGenerate
     val bankId: String,
     val stringId: String,
     val tag: String?,
@@ -38,12 +38,32 @@ data class QuestionBankEntity(
     val isBuiltin: Boolean = false
 )
 
+// ==================== Wrong Answer Entity ====================
+
+@Entity(tableName = "wrong_answers", indices = [Index("questionId")])
+data class WrongAnswerEntity(
+    @PrimaryKey val id: Long, // snowflake ID
+    val questionId: Long, // FK → questions.id
+    val note: String? = null,
+    val timestamp: Long = System.currentTimeMillis()
+)
+
+// ==================== Custom Explanation Entity ====================
+
+@Entity(tableName = "custom_explanations", indices = [Index("questionId", unique = true)])
+data class CustomExplanationEntity(
+    @PrimaryKey val id: Long, // snowflake ID
+    val questionId: Long, // FK → questions.id
+    val content: String,
+    val timestamp: Long = System.currentTimeMillis()
+)
+
 // ==================== Chat Entities ====================
 
 @Entity(tableName = "chat_messages", indices = [Index("questionId")])
 data class ChatMessageEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
-    val questionId: String,
+    val questionId: Long, // FK → questions.id (snowflake ID)
     val role: String,
     val content: String,
     val timestamp: Long = System.currentTimeMillis()
@@ -59,8 +79,8 @@ data class QuizSummaryEntity(
     val correctCount: Int,
     val wrongCount: Int,
     val accuracy: Float,
-    val aiAnalysis: String? = null, // AI analysis text if generated
-    val detailJson: String? = null  // JSON of wrong question summaries for display
+    val aiAnalysis: String? = null,
+    val detailJson: String? = null
 )
 
 // ==================== DAOs ====================
@@ -100,11 +120,20 @@ interface QuestionDao {
     @Query("SELECT bankId FROM questions WHERE stringId = :stringId LIMIT 1")
     fun findBankByStringId(stringId: String): String?
 
+    @Query("SELECT * FROM questions WHERE id = :id LIMIT 1")
+    fun findById(id: Long): QuestionEntity?
+
+    @Query("SELECT bankId FROM questions WHERE id = :id LIMIT 1")
+    fun findBankById(id: Long): String?
+
     @Query("DELETE FROM questions WHERE bankId = :bankId")
     fun deleteAllByBank(bankId: String)
 
     @Query("SELECT * FROM questions WHERE bankId = :bankId AND (question_text LIKE '%' || :query || '%' OR tag LIKE '%' || :query || '%' OR explanation LIKE '%' || :query || '%') ORDER BY COALESCE(tag, year || '年' || month || '月'), number")
     fun search(bankId: String, query: String): List<QuestionEntity>
+
+    @Query("SELECT * FROM questions WHERE id IN (:ids)")
+    fun findByIds(ids: List<Long>): List<QuestionEntity>
 }
 
 @Dao
@@ -123,9 +152,57 @@ interface QuestionBankDao {
 }
 
 @Dao
+interface WrongAnswerDao {
+    @Query("SELECT * FROM wrong_answers ORDER BY timestamp DESC")
+    fun getAll(): List<WrongAnswerEntity>
+
+    @Query("SELECT questionId FROM wrong_answers")
+    fun getAllQuestionIds(): List<Long>
+
+    @Query("SELECT EXISTS(SELECT 1 FROM wrong_answers WHERE questionId = :questionId)")
+    fun exists(questionId: Long): Boolean
+
+    @Insert
+    fun insert(entity: WrongAnswerEntity)
+
+    @Query("DELETE FROM wrong_answers WHERE questionId = :questionId")
+    fun deleteByQuestionId(questionId: Long)
+
+    @Query("DELETE FROM wrong_answers")
+    fun deleteAll()
+
+    @Query("SELECT COUNT(*) FROM wrong_answers WHERE questionId = :questionId")
+    fun countByQuestionId(questionId: Long): Int
+
+    @Query("SELECT * FROM wrong_answers WHERE questionId = :questionId LIMIT 1")
+    fun findByQuestionId(questionId: Long): WrongAnswerEntity?
+
+    @Update
+    fun update(entity: WrongAnswerEntity)
+}
+
+@Dao
+interface CustomExplanationDao {
+    @Query("SELECT * FROM custom_explanations WHERE questionId = :questionId LIMIT 1")
+    fun findByQuestionId(questionId: Long): CustomExplanationEntity?
+
+    @Insert
+    fun insert(entity: CustomExplanationEntity)
+
+    @Update
+    fun update(entity: CustomExplanationEntity)
+
+    @Query("DELETE FROM custom_explanations WHERE questionId = :questionId")
+    fun deleteByQuestionId(questionId: Long)
+
+    @Query("SELECT COUNT(*) FROM custom_explanations WHERE questionId = :questionId")
+    fun countByQuestionId(questionId: Long): Int
+}
+
+@Dao
 interface ChatMessageDao {
     @Query("SELECT * FROM chat_messages WHERE questionId = :questionId ORDER BY timestamp")
-    fun getByQuestion(questionId: String): List<ChatMessageEntity>
+    fun getByQuestion(questionId: Long): List<ChatMessageEntity>
 
     @Insert
     fun insert(message: ChatMessageEntity): Long
@@ -134,16 +211,16 @@ interface ChatMessageDao {
     fun insertAll(messages: List<ChatMessageEntity>)
 
     @Query("DELETE FROM chat_messages WHERE questionId = :questionId")
-    fun deleteByQuestion(questionId: String)
+    fun deleteByQuestion(questionId: Long)
 
     @Query("SELECT DISTINCT questionId FROM chat_messages ORDER BY questionId")
-    fun getAllQuestionIds(): List<String>
+    fun getAllQuestionIds(): List<Long>
 
     @Query("SELECT COUNT(*) FROM chat_messages WHERE questionId = :questionId")
-    fun countByQuestion(questionId: String): Int
+    fun countByQuestion(questionId: Long): Int
 
     @Query("SELECT * FROM chat_messages WHERE questionId = :questionId ORDER BY timestamp DESC LIMIT 1")
-    fun getLastMessage(questionId: String): ChatMessageEntity?
+    fun getLastMessage(questionId: Long): ChatMessageEntity?
 }
 
 @Dao
@@ -170,15 +247,19 @@ interface QuizSummaryDao {
     entities = [
         QuestionEntity::class,
         QuestionBankEntity::class,
+        WrongAnswerEntity::class,
+        CustomExplanationEntity::class,
         ChatMessageEntity::class,
         QuizSummaryEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun questionDao(): QuestionDao
     abstract fun bankDao(): QuestionBankDao
+    abstract fun wrongAnswerDao(): WrongAnswerDao
+    abstract fun customExplanationDao(): CustomExplanationDao
     abstract fun chatMessageDao(): ChatMessageDao
     abstract fun quizSummaryDao(): QuizSummaryDao
 

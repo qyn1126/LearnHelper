@@ -1,7 +1,6 @@
 package com.zhuanjie.learnhelper.ui.screen
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -57,6 +56,9 @@ import com.zhuanjie.learnhelper.data.ChatMessage
 import com.zhuanjie.learnhelper.data.ChatStorage
 import com.zhuanjie.learnhelper.data.PreferenceManager
 import com.zhuanjie.learnhelper.data.Question
+import com.zhuanjie.learnhelper.data.SnowflakeId
+import com.zhuanjie.learnhelper.data.db.AppDatabase
+import com.zhuanjie.learnhelper.data.db.CustomExplanationEntity
 import com.zhuanjie.learnhelper.network.QwenApi
 import com.zhuanjie.learnhelper.ui.theme.LearnHelperTheme
 import kotlinx.coroutines.launch
@@ -70,7 +72,10 @@ fun AiChatScreen(
     prefManager: PreferenceManager,
     onBack: () -> Unit
 ) {
-    var messages by remember { mutableStateOf(chatStorage.getMessages(question.id)) }
+    val context = LocalContext.current
+    val customExplanationDao = remember { AppDatabase.getInstance(context).customExplanationDao() }
+
+    var messages by remember { mutableStateOf(chatStorage.getMessages(question.dbId)) }
     var inputText by rememberSaveable { mutableStateOf("") }
     var isLoading by remember { mutableStateOf(false) }
     var streamingContent by remember { mutableStateOf("") }
@@ -113,7 +118,7 @@ fun AiChatScreen(
         val userMsg = ChatMessage("user", text)
         val newMessages = messages + userMsg
         messages = newMessages
-        chatStorage.saveMessages(question.id, newMessages)
+        chatStorage.saveMessages(question.dbId, newMessages)
         inputText = ""
         isLoading = true
         streamingContent = ""
@@ -132,7 +137,7 @@ fun AiChatScreen(
                 qwenApi.lastUsage?.let { prefManager.addTokenUsage(config, it) }
                 val assistantMsg = ChatMessage("assistant", sb.toString())
                 messages = messages + assistantMsg
-                chatStorage.saveMessages(question.id, messages)
+                chatStorage.saveMessages(question.dbId, messages)
                 streamingContent = ""
             } catch (e: Exception) {
                 errorMessage = e.message ?: "未知错误"
@@ -287,7 +292,18 @@ fun AiChatScreen(
                     isStreaming = false,
                     onSetAsExplanation = if (message.role == "assistant") {
                         {
-                            prefManager.setCustomExplanation(question.id, message.content)
+                            val existing = customExplanationDao.findByQuestionId(question.dbId)
+                            if (existing != null) {
+                                customExplanationDao.update(existing.copy(content = message.content, timestamp = System.currentTimeMillis()))
+                            } else {
+                                customExplanationDao.insert(
+                                    CustomExplanationEntity(
+                                        id = SnowflakeId.next(),
+                                        questionId = question.dbId,
+                                        content = message.content
+                                    )
+                                )
+                            }
                             scope.launch {
                                 snackbarHostState.showSnackbar("已设为本题 AI 解析")
                             }
