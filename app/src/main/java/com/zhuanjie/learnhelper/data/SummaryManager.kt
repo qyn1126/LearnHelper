@@ -18,8 +18,10 @@ data class QuizSummaryItem(
 
 data class WrongDetail(
     val question: String,
+    val options: Map<String, String> = emptyMap(),
     val userAnswer: String,
-    val correctAnswer: String
+    val correctAnswer: String,
+    val explanation: String? = null
 )
 
 class SummaryManager(context: Context) {
@@ -29,9 +31,11 @@ class SummaryManager(context: Context) {
     fun saveSummary(result: QuizResult, aiAnalysis: String? = null): Long {
         val wrongDetails = result.wrongRecords.map {
             WrongDetail(
-                question = it.question.question.take(100),
+                question = it.question.question,
+                options = it.question.options,
                 userAnswer = it.userAnswer,
-                correctAnswer = it.question.answer
+                correctAnswer = it.question.answer,
+                explanation = it.question.explanationText.ifBlank { null }
             )
         }
         val entity = QuizSummaryEntity(

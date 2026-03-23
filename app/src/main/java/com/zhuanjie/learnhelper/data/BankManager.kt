@@ -79,14 +79,20 @@ class BankManager(private val context: Context) {
     }
 
     fun updateQuestion(bankId: String, oldQuestionId: String, updated: Question) {
-        val entity = questionDao.findByStringId(bankId, oldQuestionId)
+        val realBankId = if (bankId == MIXED_ID) questionDao.findBankByStringId(oldQuestionId) ?: return else bankId
+        val entity = questionDao.findByStringId(realBankId, oldQuestionId)
         if (entity != null) {
-            questionDao.update(updated.toEntity(bankId, entity.id))
+            questionDao.update(updated.toEntity(realBankId, entity.id))
         }
     }
 
     fun deleteQuestion(bankId: String, questionId: String) {
-        questionDao.deleteByStringId(bankId, questionId)
+        val realBankId = if (bankId == MIXED_ID) questionDao.findBankByStringId(questionId) ?: return else bankId
+        questionDao.deleteByStringId(realBankId, questionId)
+    }
+
+    fun findBankIdForQuestion(questionId: String): String? {
+        return questionDao.findBankByStringId(questionId)
     }
 
     // --- Import / Export ---

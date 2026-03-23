@@ -121,7 +121,7 @@ fun LearnHelperApp() {
 
     val onEditQuestion: (Question) -> Unit = { question ->
         editingQuestion = question
-        editingBankId = activeBankId
+        editingBankId = bankManager.findBankIdForQuestion(question.id) ?: activeBankId
         showEditScreen = true
     }
 

@@ -89,35 +89,24 @@ fun QuizResultScreen(
         streamingAnalysis = ""
 
         val prompt = buildString {
-            append("我刚完成了一次系统架构设计师考试课后习题练习，请帮我分析这次刷题结果。\n\n")
-            append("总计: ${result.totalCount} 题\n")
-            append("正确: ${result.correctCount} 题\n")
-            append("错误: ${result.wrongCount} 题\n")
-            append("正确率: ${"%.1f".format(result.accuracy * 100)}%\n\n")
+            append("刷题结果: ${result.totalCount}题 对${result.correctCount} 错${result.wrongCount} 正确率${"%.0f".format(result.accuracy * 100)}%\n\n")
 
             if (result.wrongRecords.isNotEmpty()) {
-                append("以下是我答错的题目:\n\n")
+                append("错题:\n")
                 result.wrongRecords.forEachIndexed { index, record ->
-                    append("--- 错题 ${index + 1} ---\n")
-                    append("题目: ${record.question.question}\n")
-                    append("选项:\n")
+                    append("${index + 1}. ${record.question.question}\n")
                     record.question.options.entries.sortedBy { it.key }.forEach { (k, v) ->
                         append("  $k. $v\n")
                     }
-                    append("我的答案: ${record.userAnswer}\n")
-                    append("正确答案: ${record.question.answer}\n")
+                    append("  我选: ${record.userAnswer}  正确: ${record.question.answer}\n")
                     if (!record.question.explanationText.isNullOrBlank()) {
-                        append("原始解析: ${record.question.explanationText}\n")
+                        append("  解析: ${record.question.explanationText}\n")
                     }
                     append("\n")
                 }
             }
 
-            append("请从以下几个方面进行分析:\n")
-            append("1. 总体评价: 根据正确率给出评价\n")
-            append("2. 薄弱知识点: 分析错题涉及的知识领域和薄弱环节\n")
-            append("3. 错误原因分析: 分析每道错题的可能错误原因\n")
-            append("4. 学习建议: 给出针对性的复习建议和学习策略")
+            append("请简洁分析:\n1. 一句话总评\n2. 每道错题涉及的知识点(一句话)\n3. 针对性复习建议(2-3条)")
         }
 
         scope.launch {

@@ -97,8 +97,12 @@ App 内可导出示例 JSON 文件作为参考。
 - Kotlin: 2.0.21
 
 ## 截图
-
-*（待补充）*
+![15e2b1176fcc401d74c60b0ebc8c1dea.jpg](image/15e2b1176fcc401d74c60b0ebc8c1dea.jpg)
+![1c96732ac9294ad4091522b2cbe1ac21.jpg](image/1c96732ac9294ad4091522b2cbe1ac21.jpg)
+![7bed0dbd5895a58f72cf716b450b60ba.jpg](image/7bed0dbd5895a58f72cf716b450b60ba.jpg)
+![11468c6c7a6e37efd0812da4732e7a83.jpg](image/11468c6c7a6e37efd0812da4732e7a83.jpg)
+![37514fa85b7bfddf93ac7afe76b1add8.jpg](image/37514fa85b7bfddf93ac7afe76b1add8.jpg)
+![c7dcecaeb03e1c1d9ff0c3ba1be0b1ab.jpg](image/c7dcecaeb03e1c1d9ff0c3ba1be0b1ab.jpg)
 
 ## License
 

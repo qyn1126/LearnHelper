@@ -47,6 +47,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
@@ -198,27 +200,56 @@ fun AiChatScreen(
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             // Question info card
+            var questionExpanded by remember { mutableStateOf(false) }
             Card(
+                onClick = { questionExpanded = !questionExpanded },
                 modifier = Modifier.fillMaxWidth(),
                 colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.secondaryContainer
                 )
             ) {
                 Column(modifier = Modifier.padding(12.dp)) {
-                    Text(question.title, style = MaterialTheme.typography.titleSmall)
+                    Text(question.title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(4.dp))
                     Text(
                         question.question,
                         style = MaterialTheme.typography.bodyMedium,
-                        maxLines = 3,
+                        maxLines = if (questionExpanded) Int.MAX_VALUE else 2,
                         overflow = TextOverflow.Ellipsis
                     )
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        "正确答案: ${question.answer}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSecondaryContainer
-                    )
+                    if (questionExpanded) {
+                        Spacer(Modifier.height(8.dp))
+                        question.options.entries.sortedBy { it.key }.forEach { (k, v) ->
+                            val isCorrect = k in question.correctAnswerSet
+                            Text(
+                                "$k. $v",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = if (isCorrect) Color(0xFF4CAF50) else MaterialTheme.colorScheme.onSecondaryContainer,
+                                fontWeight = if (isCorrect) FontWeight.Bold else FontWeight.Normal
+                            )
+                        }
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            "答案: ${question.answer}",
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF4CAF50)
+                        )
+                        if (!question.explanationText.isNullOrBlank()) {
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                "解析: ${question.explanationText}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer
+                            )
+                        }
+                    } else {
+                        Text(
+                            "答案: ${question.answer}  (点击展开)",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                        )
+                    }
                 }
             }
 

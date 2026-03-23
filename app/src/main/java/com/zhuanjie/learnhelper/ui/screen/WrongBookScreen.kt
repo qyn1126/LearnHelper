@@ -262,7 +262,8 @@ private fun QuizSummariesTab(
                 qwenApi = qwenApi,
                 prefManager = prefManager,
                 onBack = { detailSummaryId = null; onUpdated() },
-                onDelete = { onDelete(summary.id); detailSummaryId = null }
+                onDelete = { onDelete(summary.id); detailSummaryId = null },
+                modifier = modifier
             )
             return
         } else {
@@ -311,7 +312,8 @@ private fun SummaryDetailView(
     qwenApi: QwenApi,
     prefManager: PreferenceManager,
     onBack: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     val scope = rememberCoroutineScope()
     var aiAnalysis by remember { mutableStateOf(summary.aiAnalysis) }
@@ -335,18 +337,20 @@ private fun SummaryDetailView(
         streamingAnalysis = ""
 
         val prompt = buildString {
-            append("我刚完成了一次刷题练习，请帮我分析结果。\n\n")
-            append("总计: ${summary.totalCount} 题\n")
-            append("正确: ${summary.correctCount} 题\n")
-            append("错误: ${summary.wrongCount} 题\n")
-            append("正确率: ${"%.1f".format(summary.accuracy * 100)}%\n\n")
+            append("刷题结果: ${summary.totalCount}题 对${summary.correctCount} 错${summary.wrongCount} 正确率${"%.0f".format(summary.accuracy * 100)}%\n\n")
             if (summary.wrongDetails.isNotEmpty()) {
                 append("错题:\n")
                 summary.wrongDetails.forEachIndexed { i, d ->
-                    append("${i + 1}. ${d.question} (选${d.userAnswer} 答案${d.correctAnswer})\n")
+                    append("${i + 1}. ${d.question}\n")
+                    d.options.entries.sortedBy { it.key }.forEach { (k, v) ->
+                        append("  $k. $v\n")
+                    }
+                    append("  我选: ${d.userAnswer}  正确: ${d.correctAnswer}\n")
+                    if (!d.explanation.isNullOrBlank()) append("  解析: ${d.explanation}\n")
+                    append("\n")
                 }
             }
-            append("\n请从总体评价、薄弱知识点、错误原因、学习建议四个方面分析。")
+            append("请简洁分析:\n1. 一句话总评\n2. 每道错题涉及的知识点(一句话)\n3. 针对性复习建议(2-3条)")
         }
 
         scope.launch {
@@ -376,7 +380,7 @@ private fun SummaryDetailView(
     }
 
     Column(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
             .padding(16.dp)
@@ -415,11 +419,31 @@ private fun SummaryDetailView(
         // Wrong details
         if (summary.wrongDetails.isNotEmpty()) {
             Spacer(Modifier.height(16.dp))
-            Text("错题摘要", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(4.dp))
-            summary.wrongDetails.forEach { detail ->
-                Text("  ${detail.question} (选${detail.userAnswer} 答案${detail.correctAnswer})",
-                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("错题详情 (${summary.wrongDetails.size})", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(8.dp))
+            summary.wrongDetails.forEachIndexed { index, detail ->
+                Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Text("${index + 1}. ${detail.question}", style = MaterialTheme.typography.bodyMedium)
+                        Spacer(Modifier.height(4.dp))
+                        detail.options.entries.sortedBy { it.key }.forEach { (k, v) ->
+                            val isCorrect = k in detail.correctAnswer
+                            val isUser = k in detail.userAnswer
+                            val color = when {
+                                isCorrect -> Color(0xFF4CAF50)
+                                isUser -> Color(0xFFF44336)
+                                else -> MaterialTheme.colorScheme.onSurfaceVariant
+                            }
+                            Text("$k. $v${if (isUser && !isCorrect) " [你的答案]" else ""}${if (isCorrect) " [正确]" else ""}",
+                                style = MaterialTheme.typography.bodySmall, color = color,
+                                fontWeight = if (isCorrect || isUser) FontWeight.Bold else FontWeight.Normal)
+                        }
+                        if (!detail.explanation.isNullOrBlank()) {
+                            Spacer(Modifier.height(4.dp))
+                            Text("解析: ${detail.explanation}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                }
             }
         }
 

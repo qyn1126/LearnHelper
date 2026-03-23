@@ -97,6 +97,9 @@ interface QuestionDao {
     @Query("SELECT * FROM questions WHERE bankId = :bankId AND stringId = :stringId LIMIT 1")
     fun findByStringId(bankId: String, stringId: String): QuestionEntity?
 
+    @Query("SELECT bankId FROM questions WHERE stringId = :stringId LIMIT 1")
+    fun findBankByStringId(stringId: String): String?
+
     @Query("DELETE FROM questions WHERE bankId = :bankId")
     fun deleteAllByBank(bankId: String)
 
