@@ -179,6 +179,8 @@ fun LearnHelperApp() {
                         prefManager = prefManager,
                         chatStorage = chatStorage,
                         summaryManager = summaryManager,
+                        qwenApi = qwenApi,
+                        isActive = currentTab == AppTab.SUMMARY,
                         onOpenAiChat = openAiChat,
                         onStartReview = { wrongQuestions ->
                             wrongReviewQuestions = wrongQuestions

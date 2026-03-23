@@ -10,14 +10,23 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -29,7 +38,9 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -43,12 +54,16 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import com.zhuanjie.learnhelper.data.ChatMessage
 import com.zhuanjie.learnhelper.data.ChatStorage
 import com.zhuanjie.learnhelper.data.PreferenceManager
 import com.zhuanjie.learnhelper.data.Question
 import com.zhuanjie.learnhelper.data.QuizSummaryItem
 import com.zhuanjie.learnhelper.data.SummaryManager
+import com.zhuanjie.learnhelper.data.WrongDetail
+import com.zhuanjie.learnhelper.network.QwenApi
 import com.zhuanjie.learnhelper.ui.theme.LearnHelperTheme
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -60,6 +75,8 @@ fun SummaryScreen(
     prefManager: PreferenceManager,
     chatStorage: ChatStorage,
     summaryManager: SummaryManager,
+    qwenApi: QwenApi,
+    isActive: Boolean = true,
     onOpenAiChat: (Question) -> Unit,
     onStartReview: (List<Question>) -> Unit,
     onEditQuestion: ((Question) -> Unit)? = null,
@@ -67,6 +84,11 @@ fun SummaryScreen(
 ) {
     var selectedTab by rememberSaveable { mutableIntStateOf(0) }
     var refreshTrigger by remember { mutableIntStateOf(0) }
+
+    // Auto-refresh when tab becomes active (picks up changes from other screens)
+    LaunchedEffect(isActive) {
+        if (isActive) refreshTrigger++
+    }
 
     val wrongIds = remember(refreshTrigger) { prefManager.getWrongAnswerIds() }
     val wrongQuestions = remember(refreshTrigger, allQuestions) {
@@ -109,8 +131,9 @@ fun SummaryScreen(
             1 -> AiChatHistoryTab(chatQuestions, chatStorage, onOpenAiChat,
                 onDeleteChat = { chatStorage.deleteMessages(it); refreshTrigger++ },
                 modifier = Modifier.padding(padding))
-            2 -> QuizSummariesTab(summaries, summaryManager,
+            2 -> QuizSummariesTab(summaries, summaryManager, qwenApi, prefManager,
                 onDelete = { summaryManager.deleteSummary(it); refreshTrigger++ },
+                onUpdated = { refreshTrigger++ },
                 modifier = Modifier.padding(padding))
         }
     }
@@ -157,7 +180,8 @@ private fun WrongQuestionsTab(
                             val custom = prefManager.getCustomExplanation(question.id)
                             if (custom != null) {
                                 Spacer(Modifier.height(8.dp))
-                                Text("AI 解析: $custom", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                                Text("AI 解析:", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                                MarkdownText(text = custom, style = MaterialTheme.typography.bodySmall)
                             }
                             Spacer(Modifier.height(8.dp))
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
@@ -220,16 +244,38 @@ private fun AiChatHistoryTab(
 private fun QuizSummariesTab(
     summaries: List<QuizSummaryItem>,
     summaryManager: SummaryManager,
+    qwenApi: QwenApi,
+    prefManager: PreferenceManager,
     onDelete: (Long) -> Unit,
+    onUpdated: () -> Unit,
     modifier: Modifier
 ) {
+    // Track which summary is open in detail view
+    var detailSummaryId by rememberSaveable { mutableStateOf<Long?>(null) }
+
+    if (detailSummaryId != null) {
+        val summary = summaries.find { it.id == detailSummaryId }
+        if (summary != null) {
+            SummaryDetailView(
+                summary = summary,
+                summaryManager = summaryManager,
+                qwenApi = qwenApi,
+                prefManager = prefManager,
+                onBack = { detailSummaryId = null; onUpdated() },
+                onDelete = { onDelete(summary.id); detailSummaryId = null }
+            )
+            return
+        } else {
+            detailSummaryId = null
+        }
+    }
+
     if (summaries.isEmpty()) {
         EmptyState("暂无刷题记录", "完成一次刷题后记录会自动保存", modifier)
     } else {
         LazyColumn(modifier = modifier.fillMaxSize(),
             contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(summaries, key = { it.id }) { summary ->
-                var expanded by rememberSaveable(summary.id) { mutableStateOf(false) }
                 val dateStr = remember(summary.timestamp) {
                     SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date(summary.timestamp))
                 }
@@ -239,44 +285,194 @@ private fun QuizSummariesTab(
                     else -> Color(0xFFF44336)
                 }
 
-                Card(onClick = { expanded = !expanded }, modifier = Modifier.fillMaxWidth()) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(dateStr, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                                Text("共 ${summary.totalCount} 题  对 ${summary.correctCount}  错 ${summary.wrongCount}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                            Text("${"%.0f".format(summary.accuracy * 100)}%", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = accuracyColor)
-                        }
-
-                        if (expanded) {
-                            Spacer(Modifier.height(8.dp))
-
-                            if (summary.wrongDetails.isNotEmpty()) {
-                                Text("错题摘要:", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
-                                summary.wrongDetails.forEach { detail ->
-                                    Text("  ${detail.question.take(40)}... (选${detail.userAnswer} 答案${detail.correctAnswer})",
-                                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                }
-                            }
-
+                Card(onClick = { detailSummaryId = summary.id }, modifier = Modifier.fillMaxWidth()) {
+                    Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(dateStr, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                            Text("共 ${summary.totalCount} 题  对 ${summary.correctCount}  错 ${summary.wrongCount}",
+                                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             if (summary.aiAnalysis != null) {
-                                Spacer(Modifier.height(8.dp))
-                                Text("AI 分析:", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                                MarkdownText(text = summary.aiAnalysis, style = MaterialTheme.typography.bodySmall)
-                            }
-
-                            Spacer(Modifier.height(8.dp))
-                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                                TextButton(onClick = { onDelete(summary.id) }) {
-                                    Text("删除", color = MaterialTheme.colorScheme.error)
-                                }
+                                Text("已生成 AI 分析", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
                             }
                         }
+                        Text("${"%.0f".format(summary.accuracy * 100)}%",
+                            style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = accuracyColor)
                     }
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun SummaryDetailView(
+    summary: QuizSummaryItem,
+    summaryManager: SummaryManager,
+    qwenApi: QwenApi,
+    prefManager: PreferenceManager,
+    onBack: () -> Unit,
+    onDelete: () -> Unit
+) {
+    val scope = rememberCoroutineScope()
+    var aiAnalysis by remember { mutableStateOf(summary.aiAnalysis) }
+    var streamingAnalysis by remember { mutableStateOf("") }
+    var isAnalyzing by remember { mutableStateOf(false) }
+    var analyzeError by remember { mutableStateOf<String?>(null) }
+
+    val dateStr = remember(summary.timestamp) {
+        SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date(summary.timestamp))
+    }
+    val accuracyColor = when {
+        summary.accuracy >= 0.8f -> Color(0xFF4CAF50)
+        summary.accuracy >= 0.6f -> Color(0xFFFF9800)
+        else -> Color(0xFFF44336)
+    }
+
+    fun generateAiAnalysis() {
+        if (isAnalyzing) return
+        isAnalyzing = true
+        analyzeError = null
+        streamingAnalysis = ""
+
+        val prompt = buildString {
+            append("我刚完成了一次刷题练习，请帮我分析结果。\n\n")
+            append("总计: ${summary.totalCount} 题\n")
+            append("正确: ${summary.correctCount} 题\n")
+            append("错误: ${summary.wrongCount} 题\n")
+            append("正确率: ${"%.1f".format(summary.accuracy * 100)}%\n\n")
+            if (summary.wrongDetails.isNotEmpty()) {
+                append("错题:\n")
+                summary.wrongDetails.forEachIndexed { i, d ->
+                    append("${i + 1}. ${d.question} (选${d.userAnswer} 答案${d.correctAnswer})\n")
+                }
+            }
+            append("\n请从总体评价、薄弱知识点、错误原因、学习建议四个方面分析。")
+        }
+
+        scope.launch {
+            try {
+                val config = prefManager.getActiveLlmConfig() ?: throw Exception("请先配置大模型")
+                val params = prefManager.analysisPromptParams
+                val messages = listOf(
+                    ChatMessage("system", prefManager.analysisSystemPrompt),
+                    ChatMessage("user", prompt)
+                )
+                val sb = StringBuilder()
+                qwenApi.chatStream(messages, config, params).collect { delta ->
+                    sb.append(delta)
+                    streamingAnalysis = sb.toString()
+                }
+                qwenApi.lastUsage?.let { prefManager.addTokenUsage(config, it) }
+                aiAnalysis = sb.toString()
+                summaryManager.updateAiAnalysis(summary.id, sb.toString())
+                streamingAnalysis = ""
+            } catch (e: Exception) {
+                analyzeError = e.message ?: "分析失败"
+                streamingAnalysis = ""
+            } finally {
+                isAnalyzing = false
+            }
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(16.dp)
+    ) {
+        // Back button
+        TextButton(onClick = onBack) { Text("< 返回列表") }
+
+        Spacer(Modifier.height(8.dp))
+
+        // Stats card
+        Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
+            Column(modifier = Modifier.padding(20.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(dateStr, style = MaterialTheme.typography.titleMedium)
+                Spacer(Modifier.height(8.dp))
+                Text("${"%.1f".format(summary.accuracy * 100)}%",
+                    style = MaterialTheme.typography.displayMedium, fontWeight = FontWeight.Bold, color = accuracyColor)
+                Text("正确率", style = MaterialTheme.typography.bodyMedium)
+                Spacer(Modifier.height(12.dp))
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("${summary.totalCount}", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                        Text("总计", style = MaterialTheme.typography.bodySmall)
+                    }
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("${summary.correctCount}", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = Color(0xFF4CAF50))
+                        Text("正确", style = MaterialTheme.typography.bodySmall)
+                    }
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("${summary.wrongCount}", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = Color(0xFFF44336))
+                        Text("错误", style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
+        }
+
+        // Wrong details
+        if (summary.wrongDetails.isNotEmpty()) {
+            Spacer(Modifier.height(16.dp))
+            Text("错题摘要", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(4.dp))
+            summary.wrongDetails.forEach { detail ->
+                Text("  ${detail.question} (选${detail.userAnswer} 答案${detail.correctAnswer})",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+
+        Spacer(Modifier.height(16.dp))
+        HorizontalDivider()
+        Spacer(Modifier.height(16.dp))
+
+        // AI Analysis section
+        val displayAnalysis = aiAnalysis ?: streamingAnalysis.ifEmpty { null }
+
+        if (displayAnalysis != null) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text("AI 分析", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary, modifier = Modifier.weight(1f))
+                if (isAnalyzing) {
+                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+            if (isAnalyzing) {
+                StreamingMarkdownText(text = displayAnalysis, style = MaterialTheme.typography.bodyMedium)
+            } else {
+                MarkdownText(text = displayAnalysis, style = MaterialTheme.typography.bodyMedium)
+            }
+            if (!isAnalyzing) {
+                Spacer(Modifier.height(8.dp))
+                OutlinedButton(onClick = { generateAiAnalysis() }, modifier = Modifier.fillMaxWidth()) {
+                    Text("重新生成 AI 分析")
+                }
+            }
+        } else if (isAnalyzing) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                Spacer(Modifier.width(8.dp))
+                Text("AI 正在分析...", style = MaterialTheme.typography.bodyMedium)
+            }
+        } else {
+            Button(onClick = { generateAiAnalysis() }, modifier = Modifier.fillMaxWidth()) {
+                Text("生成 AI 分析")
+            }
+        }
+
+        if (analyzeError != null) {
+            Spacer(Modifier.height(8.dp))
+            Text(analyzeError!!, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+            OutlinedButton(onClick = { generateAiAnalysis() }) { Text("重试") }
+        }
+
+        Spacer(Modifier.height(24.dp))
+        OutlinedButton(onClick = onDelete, modifier = Modifier.fillMaxWidth(),
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)) {
+            Text("删除此记录")
+        }
+        Spacer(Modifier.height(32.dp))
     }
 }
 
@@ -301,6 +497,7 @@ private fun SummaryScreenPreview() {
             prefManager = PreferenceManager(ctx),
             chatStorage = ChatStorage(ctx),
             summaryManager = SummaryManager(ctx),
+            qwenApi = QwenApi(),
             onOpenAiChat = {},
             onStartReview = {}
         )

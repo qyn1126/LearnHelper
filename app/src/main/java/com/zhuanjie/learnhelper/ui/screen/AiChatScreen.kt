@@ -1,6 +1,7 @@
 package com.zhuanjie.learnhelper.ui.screen
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -19,6 +20,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -220,17 +222,31 @@ fun AiChatScreen(
                 }
             }
 
-            // Hint
-            if (messages.isEmpty() && !isLoading) {
-                Text(
-                    "你可以问任何关于这道题的问题，例如:\n" +
-                            "- 这道题为什么选 ${question.answer}?\n" +
-                            "- 请详细解释每个选项\n" +
-                            "- 这个知识点还有哪些考法?",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(vertical = 16.dp)
+            // Quick actions
+            if (!isLoading) {
+                val quickActions = if (messages.isEmpty()) listOf(
+                    "这道题为什么选${question.answer}?",
+                    "请通俗易懂地分析这道题",
+                    "请简单明了地解释每个选项",
+                    "请简单易懂地复述原始解析",
+                    "这个知识点还有哪些考法?"
+                ) else listOf(
+                    "请通俗易懂地重新解释",
+                    "请简单明了地总结要点",
+                    "能再详细一些吗?",
+                    "请简单易懂地复述原始解析"
                 )
+                Column(
+                    modifier = Modifier.padding(vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    quickActions.forEach { action ->
+                        AssistChip(
+                            onClick = { inputText = action },
+                            label = { Text(action, style = MaterialTheme.typography.labelMedium) }
+                        )
+                    }
+                }
             }
 
             // Committed messages (rendered as Markdown)

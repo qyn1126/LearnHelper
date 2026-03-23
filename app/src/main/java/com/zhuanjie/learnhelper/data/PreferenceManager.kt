@@ -9,8 +9,8 @@ class PreferenceManager(context: Context) {
     private val gson = Gson()
 
     companion object {
-        const val DEFAULT_CHAT_PROMPT = "你是一位考试辅导老师。学生正在做以下题目，请帮助解答疑惑。"
-        const val DEFAULT_ANALYSIS_PROMPT = "你是一位资深的考试辅导老师，擅长分析学生的学习情况并给出专业的指导建议。"
+        const val DEFAULT_CHAT_PROMPT = "你是一位考试辅导老师。请简洁明了地解答学生关于以下题目的疑惑，回答要精炼，避免冗余。"
+        const val DEFAULT_ANALYSIS_PROMPT = "你是一位考试辅导老师。请简洁地分析刷题结果，每个要点用1-2句话概括，不要展开过多。"
     }
 
     // ==================== LLM Configs ====================

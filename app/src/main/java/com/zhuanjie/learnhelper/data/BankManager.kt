@@ -38,7 +38,9 @@ class BankManager(private val context: Context) {
     private fun ensureBuiltinImported() {
         if (!bankDao.exists(BUILTIN_ID)) {
             bankDao.insert(QuestionBankEntity(BUILTIN_ID, BUILTIN_NAME, isBuiltin = true))
-            val questions = QuestionLoader.loadFromAssets(context)
+            val questions = QuestionLoader.loadFromAssets(context).map { q ->
+                if (q.type == null && q.answer.length > 1) q.copy(type = "multi") else q
+            }
             questionDao.insertAll(questions.map { it.toEntity(BUILTIN_ID) })
         }
     }
@@ -103,9 +105,14 @@ class BankManager(private val context: Context) {
             if (q.answer.isBlank()) throw Exception("第 ${i + 1} 题缺少答案")
         }
 
+        // Auto-detect multi-choice: if answer has more than 1 character and type is not set
+        val fixedQuestions = questions.map { q ->
+            if (q.type == null && q.answer.length > 1) q.copy(type = "multi") else q
+        }
+
         val id = UUID.randomUUID().toString()
         bankDao.insert(QuestionBankEntity(id, name))
-        questionDao.insertAll(questions.map { it.toEntity(id) })
+        questionDao.insertAll(fixedQuestions.map { it.toEntity(id) })
 
         val hasMulti = questions.any { it.isMultiChoice }
         return QuestionBank(id, name, questions.size, hasMulti)

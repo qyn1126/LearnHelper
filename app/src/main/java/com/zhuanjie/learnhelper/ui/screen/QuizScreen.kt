@@ -431,6 +431,17 @@ fun QuizScreen(
                 }
             }
 
+            // Navigation
+            Spacer(Modifier.height(16.dp))
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                Button(onClick = { goToQuestion(safeIndex - 1) }, enabled = safeIndex > 0) {
+                    Text("上一题")
+                }
+                Button(onClick = { goToQuestion(safeIndex + 1) }, enabled = safeIndex < questions.size - 1) {
+                    Text("下一题")
+                }
+            }
+
             // Result & Explanation
             if (showAnswer) {
                 Spacer(Modifier.height(16.dp))
@@ -465,7 +476,7 @@ fun QuizScreen(
                 if (customExplanation != null) {
                     Text("AI 解析", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(4.dp))
-                    Text(customExplanation, style = MaterialTheme.typography.bodyMedium)
+                    MarkdownText(text = customExplanation, style = MaterialTheme.typography.bodyMedium)
                     Spacer(Modifier.height(12.dp))
                 }
 
@@ -483,18 +494,6 @@ fun QuizScreen(
                     Text("问 AI 答疑解惑")
                 }
 
-            }
-
-            Spacer(Modifier.height(24.dp))
-
-            // Navigation
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Button(onClick = { goToQuestion(safeIndex - 1) }, enabled = safeIndex > 0) {
-                    Text("上一题")
-                }
-                Button(onClick = { goToQuestion(safeIndex + 1) }, enabled = safeIndex < questions.size - 1) {
-                    Text("下一题")
-                }
             }
 
             if (sessionAnswers.isNotEmpty() && onFinish != null) {
